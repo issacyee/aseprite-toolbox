@@ -1,0 +1,149 @@
+name: Build Aseprite
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 构建目标
+        type: choice
+        default: all
+        options:
+          - all
+          - windows-x64
+          - linux-x64
+          - macos-arm64
+          - macos-x64
+      aseprite_version:
+        description: Aseprite tag，留空使用 versions.env
+        type: string
+        default: ''
+      skia_version:
+        description: Skia tag，留空使用 versions.env
+        type: string
+        default: ''
+      publish_release:
+        description: 验证成功后发布 GitHub Release
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      aseprite_version: ${{ steps.config.outputs.aseprite_version }}
+      skia_version: ${{ steps.config.outputs.skia_version }}
+      matrix: ${{ steps.config.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Resolve configuration
+        id: config
+        env:
+          TARGET: ${{ inputs.target }}
+          ASEPRITE_OVERRIDE: ${{ inputs.aseprite_version }}
+          SKIA_OVERRIDE: ${{ inputs.skia_version }}
+        run: |
+          args=(resolve --target "$TARGET")
+          if [[ -n "$ASEPRITE_OVERRIDE" ]]; then args+=(--aseprite-version "$ASEPRITE_OVERRIDE"); fi
+          if [[ -n "$SKIA_OVERRIDE" ]]; then args+=(--skia-version "$SKIA_OVERRIDE"); fi
+          config=$(bash tools/aseprite/build.sh "${args[@]}")
+          jq -r '"aseprite_version=\(.aseprite_version)", "skia_version=\(.skia_version)", "matrix=\(.matrix | tojson)"' \
+            <<< "$config" >> "$GITHUB_OUTPUT"
+          # Markdown code fences are literal, not shell command substitutions.
+          # shellcheck disable=SC2016
+          printf '### Build configuration\n```json\n%s\n```\n' "$config" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang cmake ninja-build unzip \
+            libx11-dev libxcursor-dev libxi-dev libxrandr-dev libgl1-mesa-dev libfontconfig1-dev
+      - name: Initialize MSVC x64
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1.13.0
+        with:
+          arch: x64
+      - name: Ensure Ninja on Windows
+        if: runner.os == 'Windows'
+        run: |
+          if ! command -v ninja >/dev/null; then choco install ninja --yes --no-progress; fi
+      - name: Ensure Ninja on macOS
+        if: runner.os == 'macOS'
+        run: |
+          if ! command -v ninja >/dev/null; then brew install ninja; fi
+      - name: Build and test the extracted ZIP
+        env:
+          TARGET: ${{ matrix.target }}
+          ASEPRITE_VERSION: ${{ needs.prepare.outputs.aseprite_version }}
+          SKIA_VERSION: ${{ needs.prepare.outputs.skia_version }}
+        run: |
+          bash tools/aseprite/build.sh build --target "$TARGET" \
+            --aseprite-version "$ASEPRITE_VERSION" --skia-version "$SKIA_VERSION"
+      - name: Save verified ZIP
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: aseprite-${{ matrix.target }}
+          path: dist/*.zip
+          archive: true
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish Release
+    needs: [prepare, build]
+    if: ${{ inputs.publish_release }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: aseprite-release-${{ needs.prepare.outputs.aseprite_version }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: aseprite-*
+          path: .work/artifacts
+          merge-multiple: true
+      - name: Publish selected platform assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ASEPRITE_VERSION: ${{ needs.prepare.outputs.aseprite_version }}
+          MATRIX: ${{ needs.prepare.outputs.matrix }}
+        run: |
+          files=()
+          while IFS= read -r target; do
+            file=".work/artifacts/Aseprite-$ASEPRITE_VERSION-$target.zip"
+            [[ -s "$file" ]] || { printf 'Missing artifact: %s\n' "$file" >&2; exit 1; }
+            files+=("$file")
+          done < <(jq -r '.include[].target' <<< "$MATRIX")
+          ((${#files[@]})) || { echo 'No artifacts selected' >&2; exit 1; }
+          tag="aseprite-$ASEPRITE_VERSION"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            printf 'Aseprite %s 的个人构建。\n\n上游：https://github.com/aseprite/aseprite/releases/tag/%s\n\n各平台的源码、Skia、工具箱提交和构建时间见 ZIP 内的 build-info.txt。\n' \
+              "$ASEPRITE_VERSION" "$ASEPRITE_VERSION" > .work/release-notes.md
+            gh release create "$tag" --target "$GITHUB_SHA" --draft \
+              --title "Aseprite $ASEPRITE_VERSION" --notes-file .work/release-notes.md
+          fi
+          gh release upload "$tag" "${files[@]}" --clobber
+          gh release edit "$tag" --draft=false
+          printf '### Release\n[%s](%s/%s/releases/tag/%s)\n' \
+            "$tag" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$tag" >> "$GITHUB_STEP_SUMMARY"

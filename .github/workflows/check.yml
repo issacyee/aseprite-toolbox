@@ -1,0 +1,51 @@
+name: Check toolbox
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install actionlint and ShellCheck
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+        run: |
+          mkdir -p .work/check-tools
+          curl --fail --location --retry 3 \
+            "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            | tar -xz -C .work/check-tools actionlint
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
+      - name: Check workflows and shell scripts
+        shell: bash
+        run: |
+          .work/check-tools/actionlint -color
+          while IFS= read -r -d '' script; do
+            bash -n "$script"
+            shellcheck -x "$script"
+          done < <(find tools -type f -name '*.sh' -print0)
+      - name: Check version configuration and target matrix
+        shell: bash
+        run: |
+          config=$(bash tools/aseprite/build.sh resolve)
+          jq -e '.matrix.include | length == 4' <<< "$config"
+          for target in windows-x64 linux-x64 macos-arm64 macos-x64; do
+            config=$(bash tools/aseprite/build.sh resolve --target "$target")
+            jq -e --arg target "$target" '.matrix.include | length == 1 and .[0].target == $target' <<< "$config"
+          done
+          config=$(bash tools/aseprite/build.sh resolve --aseprite-version v1.3.17 --skia-version m124-abcdef)
+          jq -e '.aseprite_version == "v1.3.17" and .skia_version == "m124-abcdef"' <<< "$config"
+          if bash tools/aseprite/build.sh resolve --target invalid; then exit 1; fi
+          if bash tools/aseprite/build.sh resolve --aseprite-version ../invalid; then exit 1; fi
+          if bash tools/aseprite/build.sh resolve --skia-version invalid; then exit 1; fi
