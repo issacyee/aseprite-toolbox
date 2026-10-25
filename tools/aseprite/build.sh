@@ -43,7 +43,9 @@ skia_version=$SKIA_VERSION
 while (($#)); do
   case "$1" in
     --target|--aseprite-version|--skia-version)
-      (($# >= 2)) && [[ -n "$2" && "$2" != --* ]] || die "Missing value for $1"
+      if (($# < 2)) || [[ -z "$2" || "$2" == --* ]]; then
+        die "Missing value for $1"
+      fi
       case "$1" in
         --target) target=$2 ;;
         --aseprite-version) aseprite_version=$2 ;;
