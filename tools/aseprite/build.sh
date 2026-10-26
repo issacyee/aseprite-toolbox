@@ -57,7 +57,7 @@ while (($#)); do
   esac
 done
 
-# Restrict tags before using them in URLs, paths, shell output, or JSON.
+# tag 用于 URL、路径、Shell 输出或 JSON 前，先限制其格式。
 [[ "$aseprite_version" =~ ^v[0-9]+(\.[0-9]+){1,3}(-[A-Za-z0-9]+([.-][A-Za-z0-9]+)*)?$ ]] \
   || die "Invalid Aseprite version tag: $aseprite_version"
 [[ "$skia_version" =~ ^m[0-9]+-[a-f0-9]+$ ]] || die "Invalid Skia version tag: $skia_version"
@@ -114,7 +114,7 @@ native_path() {
 }
 
 mkdir -p "$repo_root/.work/aseprite" "$repo_root/dist"
-# A fresh directory prevents old objects or packages from leaking into a rebuild.
+# 每次使用新目录，避免重建时混入旧的目标文件或安装包。
 work_dir=$(mktemp -d "$repo_root/.work/aseprite/$target.XXXXXX")
 source_dir=$work_dir/source
 skia_dir=$work_dir/skia
@@ -128,7 +128,7 @@ log "Work directory: $work_dir"
 log "Downloading Aseprite $aseprite_version and submodules"
 git clone --branch "$aseprite_version" --depth 1 --recurse-submodules --shallow-submodules \
   https://github.com/aseprite/aseprite.git "$source_dir"
-# --branch also accepts branch names; require an exact tag for reproducible metadata.
+# --branch 也接受分支名，因此必须核实精确 tag，确保构建元数据可追溯。
 git -C "$source_dir" describe --exact-match --tags HEAD | grep -Fx -- "$aseprite_version" >/dev/null \
   || die "Source checkout does not match tag $aseprite_version"
 required_skia=$(tr -d '\r\n' < "$source_dir/laf/misc/skia-tag.txt")
@@ -152,7 +152,7 @@ skia_library_dir=$skia_dir/out/Release-$skia_arch
 cmake_args=(
   -S "$(native_path "$source_dir")" -B "$(native_path "$build_dir")" -G Ninja
   -DCMAKE_BUILD_TYPE=Release
-  # CMake 4 removed older policies still requested by some bundled dependencies.
+  # CMake 4 移除了部分随附依赖仍在声明的旧策略。
   -DCMAKE_POLICY_VERSION_MINIMUM=3.5
   -DENABLE_TESTS=OFF -DENABLE_SCRIPTING=ON -DENABLE_CCACHE=OFF
   -DLAF_BACKEND=skia -DOPENSSL_USE_STATIC_LIBS=ON
@@ -176,8 +176,8 @@ log 'Configuring and building Release with Lua scripting'
 cmake "${cmake_args[@]}"
 cmake --build "$(native_path "$build_dir")" --target aseprite --parallel
 
-# macOS bin/aseprite and bin/data are absolute symlinks into the app bundle.
-# Copy the complete bundle, rather than shipping symlinks into the build machine.
+# macOS 的 bin/aseprite 和 bin/data 是指向应用包内部的绝对符号链接。
+# 复制完整应用包，避免产物中的链接仍指向构建机器。
 if [[ "$target" == macos-* ]]; then
   cp -R "$build_dir/bin/Aseprite.app" "$package_dir/"
   executable_relative=Aseprite.app/Contents/MacOS/aseprite
@@ -188,13 +188,13 @@ else
   cp "$build_dir/bin/$executable_relative" "$package_dir/"
   cp -R "$build_dir/bin/data" "$package_dir/"
   data_relative=data
-  # Preserve runtime libraries if the native build emits any next to the executable.
+  # 保留原生构建在可执行文件旁生成的运行库。
   shopt -s nullglob
   runtime_libraries=("$build_dir/bin/"*.dll "$build_dir/bin/"*.so "$build_dir/bin/"*.so.*)
   if ((${#runtime_libraries[@]})); then cp -L "${runtime_libraries[@]}" "$package_dir/"; fi
 fi
 portable_config=$(dirname "$package_dir/$executable_relative")/aseprite.ini
-printf '# Portable Aseprite configuration\n' > "$portable_config"
+printf '# Aseprite 便携配置\n' > "$portable_config"
 {
   printf 'aseprite_version=%s\n' "$aseprite_version"
   printf 'aseprite_commit=%s\n' "$(git -C "$source_dir" rev-parse HEAD)"
@@ -205,7 +205,7 @@ printf '# Portable Aseprite configuration\n' > "$portable_config"
   printf 'workflow_run=%s\n' "${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-local}/actions/runs/${GITHUB_RUN_ID:-local}"
 } > "$package_dir/build-info.txt"
 
-# Do not expose the final ZIP until the extracted package has passed all checks.
+# 解压后的安装包通过全部检查后，才输出最终 ZIP。
 candidate_archive=$work_dir/Aseprite-$aseprite_version-$target.zip
 (cd "$package_dir" && cmake -E tar cf "$(native_path "$candidate_archive")" --format=zip .)
 (cd "$verify_dir" && cmake -E tar xf "$(native_path "$candidate_archive")")
@@ -225,5 +225,14 @@ log "Testing extracted package: $reported_version"
 "$executable" --batch --script-param "output=$(native_path "$work_dir/smoke.png")" \
   --script "$(native_path "$work_dir/smoke.lua")"
 [[ -s "$work_dir/smoke.png" ]] || die 'Packaged Lua runtime did not export the smoke-test PNG'
+# 使用解压产物中的运行时验证扩展的真实图像和事件 API。
+# Lua 测试会跳过低于扩展兼容基线的版本。
+log 'Testing timelapse recording with the extracted Lua runtime'
+"$executable" --batch --script-param "output=$(native_path "$work_dir/timelapse")" \
+  --script "$(native_path "$repo_root/tests/timelapse/aseprite.lua")"
+if [[ ! -s "$work_dir/timelapse/result.json" ]] \
+  || ! grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' "$work_dir/timelapse/result.json"; then
+  die 'Packaged Lua runtime did not pass the timelapse integration test'
+fi
 cp "$candidate_archive" "$archive"
 log "Verified ZIP: $archive"

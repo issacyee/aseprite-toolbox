@@ -1,0 +1,11 @@
+{
+  "name": "toolbox-timelapse-recorder",
+  "displayName": "Timelapse Recorder",
+  "description": "Record single-frame artwork across sessions and export MP4 timelapses with FFmpeg.",
+  "version": "0.1.0",
+  "author": { "name": "issacyee" },
+  "publisher": "issacyee",
+  "license": "MIT",
+  "categories": ["Scripts"],
+  "contributes": { "scripts": [{ "path": "./main.lua" }] }
+}

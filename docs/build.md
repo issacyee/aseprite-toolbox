@@ -41,7 +41,7 @@ ZIP 命名为 `Aseprite-<version>-<target>.zip`，例如 `Aseprite-v1.3.18.6-win
 
 ZIP 内的 `build-info.txt` 记录 Aseprite tag / commit、Skia tag、目标、工具箱提交、构建时间和运行链接。上游附带的许可与作者文件随 `data/` 保留。
 
-打包后，在新的目录解压，检查可执行权限、`data/gui.xml`、程序版本，并用解压后的程序执行 Lua 批处理，创建并保存一个 PNG。只有这些检查成功后，ZIP 才会复制到 `dist/` 并上传为 Artifact。
+打包后，在新的目录解压，检查可执行权限、`data/gui.xml`、程序版本，并用解压后的程序执行 Lua 批处理，创建并保存一个 PNG。兼容延时绘画插件的版本还会执行真实图像与事件集成测试，覆盖撤销重做、色彩模式、另存为和续录；旧于 1.3.18.6 的覆盖版本跳过插件测试。只有这些检查成功后，ZIP 才会复制到 `dist/` 并上传为 Artifact。
 
 ### 下载和发布
 
@@ -84,7 +84,7 @@ bash tools/aseprite/build.sh build --target linux-x64 \
 
 ## 检查与排错
 
-日常 push、PR 和手动 **Check toolbox** 运行 actionlint、`bash -n`、ShellCheck，并校验默认矩阵、单平台选择、版本覆盖与无效输入；不会下载 Aseprite 或触发完整编译。Shell / env 文件通过 `.gitattributes` 固定使用 LF。
+日常 push、PR 和手动 **Check toolbox** 运行 actionlint、`bash -n`、ShellCheck，并校验默认矩阵、单平台选择、版本覆盖与无效输入；同时检查延时绘画插件的 Lua 语法、记录生命周期、安装包及四个平台目标的实际 FFmpeg 编码、取消与错误处理。日常检查不下载 Aseprite 或触发完整编译，真实 Aseprite 集成测试随手动完整构建执行。脚本文件通过 `.gitattributes` 固定使用 LF。
 
 | 问题 | 检查方式 |
 | --- | --- |

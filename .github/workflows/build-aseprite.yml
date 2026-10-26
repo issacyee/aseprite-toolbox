@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: 构建目标
+        description: Build target
         type: choice
         default: all
         options:
@@ -14,15 +14,15 @@ on:
           - macos-arm64
           - macos-x64
       aseprite_version:
-        description: Aseprite tag，留空使用 versions.env
+        description: Aseprite tag (leave blank to use versions.env)
         type: string
         default: ''
       skia_version:
-        description: Skia tag，留空使用 versions.env
+        description: Skia tag (leave blank to use versions.env)
         type: string
         default: ''
       publish_release:
-        description: 验证成功后发布 GitHub Release
+        description: Publish a GitHub Release after successful validation
         type: boolean
         default: true
 
@@ -55,7 +55,7 @@ jobs:
           config=$(bash tools/aseprite/build.sh "${args[@]}")
           jq -r '"aseprite_version=\(.aseprite_version)", "skia_version=\(.skia_version)", "matrix=\(.matrix | tojson)"' \
             <<< "$config" >> "$GITHUB_OUTPUT"
-          # Markdown code fences are literal, not shell command substitutions.
+          # Markdown 代码围栏是字面文本，不能当作 Shell 命令替换执行。
           # shellcheck disable=SC2016
           printf '### Build configuration\n```json\n%s\n```\n' "$config" >> "$GITHUB_STEP_SUMMARY"
 
@@ -138,7 +138,7 @@ jobs:
           ((${#files[@]})) || { echo 'No artifacts selected' >&2; exit 1; }
           tag="aseprite-$ASEPRITE_VERSION"
           if ! gh release view "$tag" >/dev/null 2>&1; then
-            printf 'Aseprite %s 的个人构建。\n\n上游：https://github.com/aseprite/aseprite/releases/tag/%s\n\n各平台的源码、Skia、工具箱提交和构建时间见 ZIP 内的 build-info.txt。\n' \
+            printf 'Personal build of Aseprite %s.\n\nUpstream: https://github.com/aseprite/aseprite/releases/tag/%s\n\nSee build-info.txt inside each ZIP for its source version, Skia version, toolbox commit, and build time.\n' \
               "$ASEPRITE_VERSION" "$ASEPRITE_VERSION" > .work/release-notes.md
             gh release create "$tag" --target "$GITHUB_SHA" --draft \
               --title "Aseprite $ASEPRITE_VERSION" --notes-file .work/release-notes.md

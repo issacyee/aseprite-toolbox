@@ -1,6 +1,8 @@
 # Aseprite 扩展
 
-存放通过 Aseprite 扩展机制安装的内容，包括脚本插件、主题、调色板等。目前尚未添加扩展。
+存放通过 Aseprite 扩展机制安装的内容，包括脚本插件、主题、调色板等。
+
+- [延时绘画](timelapse-recorder/README.md)：逐操作保存单帧作品的画布，跨次续录并导出 MP4。需要 Aseprite 1.3.18.6+，视频导出另需 FFmpeg。
 
 ## 新增约定
 

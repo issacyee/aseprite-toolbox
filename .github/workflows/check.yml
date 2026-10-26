@@ -26,7 +26,7 @@ jobs:
             "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
             | tar -xz -C .work/check-tools actionlint
           sudo apt-get update
-          sudo apt-get install --yes shellcheck
+          sudo apt-get install --yes shellcheck lua5.4 lua-cjson
       - name: Check workflows and shell scripts
         shell: bash
         run: |
@@ -35,6 +35,13 @@ jobs:
             bash -n "$script"
             shellcheck -x "$script"
           done < <(find tools -type f -name '*.sh' -print0)
+      - name: Check timelapse Lua, shell worker, and recording lifecycle
+        run: |
+          while IFS= read -r -d '' script; do luac5.4 -p "$script"; done \
+            < <(find extensions/timelapse-recorder tests/timelapse -type f -name '*.lua' -print0)
+          sh -n extensions/timelapse-recorder/workers/encode.sh
+          shellcheck extensions/timelapse-recorder/workers/encode.sh
+          lua5.4 tests/timelapse/run.lua
       - name: Check version configuration and target matrix
         shell: bash
         run: |
@@ -49,3 +56,51 @@ jobs:
           if bash tools/aseprite/build.sh resolve --target invalid; then exit 1; fi
           if bash tools/aseprite/build.sh resolve --aseprite-version ../invalid; then exit 1; fi
           if bash tools/aseprite/build.sh resolve --skia-version invalid; then exit 1; fi
+
+  timelapse:
+    name: Timelapse / ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            runner: windows-2022
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: macos-arm64
+            runner: macos-15
+          - target: macos-x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install FFmpeg on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg
+      - name: Install FFmpeg on macOS
+        if: runner.os == 'macOS'
+        run: command -v ffmpeg || brew install ffmpeg
+      - name: Install FFmpeg on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg --yes --no-progress
+          }
+          $encoder = (Get-Command ffmpeg -ErrorAction Stop).Source
+          "FFMPEG=$encoder" >> $env:GITHUB_ENV
+          "FFPROBE=$(Join-Path (Split-Path -Parent $encoder) 'ffprobe.exe')" >> $env:GITHUB_ENV
+      - name: Test actual encoding, cancellation, errors, and extension package
+        env:
+          CI: 'true'
+        run: |
+          node --test tests/timelapse/package.test.mjs tests/timelapse/workers.test.mjs
+          node tools/timelapse/package.mjs
+      - name: Save extension package
+        if: matrix.target == 'linux-x64'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: timelapse-recorder
+          path: dist/timelapse-recorder-*.aseprite-extension
+          if-no-files-found: error
